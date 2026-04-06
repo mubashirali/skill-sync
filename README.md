@@ -2,39 +2,17 @@
 
 Personal [Claude Code](https://claude.ai/code) skills — reusable techniques and workflows that load into Claude automatically when needed.
 
-## Install via npx (recommended)
+## Install
 
 ```bash
-# Install all skills from this repo
-npx @alimubashir/skillsync add https://github.com/alimubashir/skill-sync
+# Install all skills
+npx skills add alimubashir/skill-sync
 
 # Install a specific skill
-npx @alimubashir/skillsync add https://github.com/alimubashir/skill-sync --skill writing-linkedin-posts
+npx skills add alimubashir/skill-sync --skill writing-linkedin-posts
 ```
 
-No installation required — `npx` runs it directly. Requires Node.js 18+.
-
-## Other Commands
-
-```bash
-# List installed skills
-npx @alimubashir/skillsync list
-
-# Update all skills to latest
-npx @alimubashir/skillsync update
-
-# Update one skill
-npx @alimubashir/skillsync update writing-linkedin-posts
-
-# Remove a skill
-npx @alimubashir/skillsync remove writing-linkedin-posts
-```
-
-## Quick Install (bash alternative)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/alimubashir/skill-sync/main/skills.sh | bash
-```
+Works with Claude Code, Cursor, Windsurf, Codex, Gemini CLI, and any agent that supports the skills spec.
 
 ## Skills
 
