@@ -1,23 +1,19 @@
-name: Release Skills
+name: Validate Skills
 
 on:
   push:
-    branches: ["main"]
-
-permissions:
-  contents: write
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
 
 jobs:
-  release:
-    name: Validate, package, and release skills
+  validate:
+    name: Validate skill structure and frontmatter
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Validate skills
         run: |
@@ -25,88 +21,79 @@ jobs:
 
           SKILLS_DIR="skills"
           errors=0
+          count=0
 
-          [ -d "$SKILLS_DIR" ] || { echo "ERROR: skills/ directory not found"; exit 1; }
+          if [ ! -d "$SKILLS_DIR" ]; then
+            echo "ERROR: skills/ directory not found"
+            exit 1
+          fi
 
           for skill_dir in "$SKILLS_DIR"/*/; do
             [ -d "$skill_dir" ] || continue
             skill_name=$(basename "$skill_dir")
+            echo "Checking: $skill_name"
 
-            [ -f "$skill_dir/SKILL.md" ] || { echo "ERROR: Missing SKILL.md in $skill_name"; (( errors++ )) || true; continue; }
+            # 1. Must have SKILL.md
+            if [ ! -f "$skill_dir/SKILL.md" ]; then
+              echo "  ERROR: Missing SKILL.md in $skill_dir"
+              (( errors++ )) || true
+              continue
+            fi
 
             skill_file="$skill_dir/SKILL.md"
 
-            head -1 "$skill_file" | grep -q "^---$" || { echo "ERROR: $skill_name missing frontmatter"; (( errors++ )) || true; }
-            awk '/^---/{c++} c==1 && /^name:/{found=1} END{exit !found}' "$skill_file" || { echo "ERROR: $skill_name missing name field"; (( errors++ )) || true; }
-            awk '/^---/{c++} c==1 && /^description:/{found=1} END{exit !found}' "$skill_file" || { echo "ERROR: $skill_name missing description field"; (( errors++ )) || true; }
+            # 2. Must have YAML frontmatter (opening ---)
+            if ! head -1 "$skill_file" | grep -q "^---$"; then
+              echo "  ERROR: $skill_name/SKILL.md missing YAML frontmatter (must start with ---)"
+              (( errors++ )) || true
+              continue
+            fi
+
+            # 3. Must have 'name' field in frontmatter
+            if ! awk '/^---/{c++} c==1 && /^name:/{found=1} END{exit !found}' "$skill_file"; then
+              echo "  ERROR: $skill_name/SKILL.md missing 'name' field in frontmatter"
+              (( errors++ )) || true
+            fi
+
+            # 4. name must only contain letters, numbers, hyphens
+            name_val=$(awk '/^---/{c++} c==1 && /^name:/{sub(/^name: */,""); print; exit}' "$skill_file")
+            if ! echo "$name_val" | grep -qE '^[a-zA-Z0-9-]+$'; then
+              echo "  ERROR: $skill_name/SKILL.md — name '$name_val' contains invalid characters (only letters, numbers, hyphens allowed)"
+              (( errors++ )) || true
+            fi
+
+            # 5. Must have 'description' field in frontmatter
+            if ! awk '/^---/{c++} c==1 && /^description:/{found=1} END{exit !found}' "$skill_file"; then
+              echo "  ERROR: $skill_name/SKILL.md missing 'description' field in frontmatter"
+              (( errors++ )) || true
+            fi
+
+            # 6. Total frontmatter must be under 1024 characters
+            frontmatter=$(awk '/^---/{c++; if(c==2) exit} c==1' "$skill_file")
+            fm_len=${#frontmatter}
+            if [ "$fm_len" -gt 1024 ]; then
+              echo "  ERROR: $skill_name/SKILL.md frontmatter exceeds 1024 characters ($fm_len chars)"
+              (( errors++ )) || true
+            fi
+
+            # 7. description must not be empty
+            desc_val=$(awk '/^---/{c++} c==1 && /^description:/{sub(/^description: */,""); print; exit}' "$skill_file")
+            if [ -z "$desc_val" ]; then
+              echo "  ERROR: $skill_name/SKILL.md — description field is empty"
+              (( errors++ )) || true
+            fi
+
+            echo "  OK"
+            (( count++ )) || true
           done
 
-          [ "$errors" -eq 0 ] || { echo "Validation failed with $errors error(s)"; exit 1; }
-          echo "All skills valid."
+          echo ""
+          echo "─────────────────────────────"
+          echo "Skills checked: $count"
 
-      - name: Read current version
-        id: version
-        run: |
-          current=$(cat version.txt | tr -d '[:space:]')
-          echo "current=$current" >> "$GITHUB_OUTPUT"
-
-          # Bump patch version: 0.1.0 -> 0.1.1
-          IFS='.' read -r major minor patch <<< "$current"
-          patch=$(( patch + 1 ))
-          next="${major}.${minor}.${patch}"
-          echo "next=$next" >> "$GITHUB_OUTPUT"
-          echo "tag=v${next}" >> "$GITHUB_OUTPUT"
-
-      - name: Update version.txt
-        run: |
-          echo "${{ steps.version.outputs.next }}" > version.txt
-
-      - name: Generate release notes
-        id: notes
-        run: |
-          skills_list=""
-          for skill_dir in skills/*/; do
-            [ -d "$skill_dir" ] || continue
-            skill_name=$(basename "$skill_dir")
-            desc=$(awk '/^---/{c++} c==1 && /^description:/{sub(/^description: */,""); print; exit}' "$skill_dir/SKILL.md")
-            skills_list="${skills_list}- **${skill_name}**: ${desc}\n"
-          done
-
-          skill_count=$(ls -d skills/*/ 2>/dev/null | wc -l | tr -d ' ')
-
-          notes="## Claude Code Skills ${{ steps.version.outputs.tag }}\n\n"
-          notes+="### Included Skills (${skill_count})\n\n"
-          notes+="${skills_list}\n"
-          notes+="### Install\n\n"
-          notes+="\`\`\`bash\n"
-          notes+="# One-liner install\n"
-          notes+="curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/skills.sh | bash\n\n"
-          notes+="# Or update existing install\n"
-          notes+="./skills.sh update\n"
-          notes+="\`\`\`\n"
-
-          # Write to file (handles multiline)
-          printf "$notes" > release_notes.md
-          echo "Generated release notes"
-
-      - name: Package skills
-        run: |
-          zip -r "skillsync-${{ steps.version.outputs.tag }}.zip" skills/ skills.sh version.txt
-          echo "Packaged: skillsync-${{ steps.version.outputs.tag }}.zip"
-
-      - name: Commit version bump
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add version.txt
-          git commit -m "chore: bump version to ${{ steps.version.outputs.next }}"
-          git push
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: "skill-sync ${{ steps.version.outputs.tag }}"
-          body_path: release_notes.md
-          files: skillsync-${{ steps.version.outputs.tag }}.zip
-          make_latest: true
+          if [ "$errors" -gt 0 ]; then
+            echo "Errors found: $errors"
+            exit 1
+          else
+            echo "All skills are valid!"
+          fi
