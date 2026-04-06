@@ -1,0 +1,112 @@
+name: Release Skills
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Validate, package, and release skills
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate skills
+        run: |
+          set -euo pipefail
+
+          SKILLS_DIR="skills"
+          errors=0
+
+          [ -d "$SKILLS_DIR" ] || { echo "ERROR: skills/ directory not found"; exit 1; }
+
+          for skill_dir in "$SKILLS_DIR"/*/; do
+            [ -d "$skill_dir" ] || continue
+            skill_name=$(basename "$skill_dir")
+
+            [ -f "$skill_dir/SKILL.md" ] || { echo "ERROR: Missing SKILL.md in $skill_name"; (( errors++ )) || true; continue; }
+
+            skill_file="$skill_dir/SKILL.md"
+
+            head -1 "$skill_file" | grep -q "^---$" || { echo "ERROR: $skill_name missing frontmatter"; (( errors++ )) || true; }
+            awk '/^---/{c++} c==1 && /^name:/{found=1} END{exit !found}' "$skill_file" || { echo "ERROR: $skill_name missing name field"; (( errors++ )) || true; }
+            awk '/^---/{c++} c==1 && /^description:/{found=1} END{exit !found}' "$skill_file" || { echo "ERROR: $skill_name missing description field"; (( errors++ )) || true; }
+          done
+
+          [ "$errors" -eq 0 ] || { echo "Validation failed with $errors error(s)"; exit 1; }
+          echo "All skills valid."
+
+      - name: Read current version
+        id: version
+        run: |
+          current=$(cat version.txt | tr -d '[:space:]')
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+
+          # Bump patch version: 0.1.0 -> 0.1.1
+          IFS='.' read -r major minor patch <<< "$current"
+          patch=$(( patch + 1 ))
+          next="${major}.${minor}.${patch}"
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "tag=v${next}" >> "$GITHUB_OUTPUT"
+
+      - name: Update version.txt
+        run: |
+          echo "${{ steps.version.outputs.next }}" > version.txt
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          skills_list=""
+          for skill_dir in skills/*/; do
+            [ -d "$skill_dir" ] || continue
+            skill_name=$(basename "$skill_dir")
+            desc=$(awk '/^---/{c++} c==1 && /^description:/{sub(/^description: */,""); print; exit}' "$skill_dir/SKILL.md")
+            skills_list="${skills_list}- **${skill_name}**: ${desc}\n"
+          done
+
+          skill_count=$(ls -d skills/*/ 2>/dev/null | wc -l | tr -d ' ')
+
+          notes="## Claude Code Skills ${{ steps.version.outputs.tag }}\n\n"
+          notes+="### Included Skills (${skill_count})\n\n"
+          notes+="${skills_list}\n"
+          notes+="### Install\n\n"
+          notes+="\`\`\`bash\n"
+          notes+="# One-liner install\n"
+          notes+="curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/skills.sh | bash\n\n"
+          notes+="# Or update existing install\n"
+          notes+="./skills.sh update\n"
+          notes+="\`\`\`\n"
+
+          # Write to file (handles multiline)
+          printf "$notes" > release_notes.md
+          echo "Generated release notes"
+
+      - name: Package skills
+        run: |
+          zip -r "skillsync-${{ steps.version.outputs.tag }}.zip" skills/ skills.sh version.txt
+          echo "Packaged: skillsync-${{ steps.version.outputs.tag }}.zip"
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.txt
+          git commit -m "chore: bump version to ${{ steps.version.outputs.next }}"
+          git push
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "skill-sync ${{ steps.version.outputs.tag }}"
+          body_path: release_notes.md
+          files: skillsync-${{ steps.version.outputs.tag }}.zip
+          make_latest: true
