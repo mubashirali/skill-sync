@@ -6,10 +6,10 @@ Personal [Claude Code](https://claude.ai/code) skills — reusable techniques an
 
 ```bash
 # Install all skills
-npx skills add alimubashir/skill-sync
+npx skills add mubashirali/skill-sync
 
 # Install a specific skill
-npx skills add alimubashir/skill-sync --skill writing-linkedin-posts
+npx skills add mubashirali/skill-sync --skill writing-linkedin-posts
 ```
 
 Works with Claude Code, Cursor, Windsurf, Codex, Gemini CLI, and any agent that supports the skills spec.
@@ -74,4 +74,4 @@ The release workflow needs write access to create releases and commit the versio
 
 ## Version
 
-Current: `0.1.0` — see [releases](https://github.com/alimubashir/skill-sync/releases) for history.
+Current: `0.1.0` — see [releases](https://github.com/mubashirali/skill-sync/releases) for history.
